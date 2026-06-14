@@ -6,6 +6,49 @@ be deferred. Newest gate first.
 
 ---
 
+## G2 — Editor shell (2026-06-14)
+
+### Tests / checks — all green
+- `pnpm typecheck`: clean. `pnpm build`: green (worker 401 KB w/ sucrase, still under `/assets/`).
+- `pnpm verify`: 16/16 (cad.ts now auto-unwraps; harness unaffected).
+- In browser: the editor's source is compiled (sucrase → CJS, `new Function` with the CAD API
+  injected) and built into the bracket; **Run** (button + Cmd/Ctrl+Enter) rebuilds edited source
+  (verified a `fuse` model live). Error region proven:
+  - compile error → `compile · line 4`, "Unexpected token, expected …";
+  - build error → `build`, "frobnicate is not defined";
+  - viewport keeps the last good part (never blank); fixing + Run clears the error and renders.
+
+### What G2 delivered
+- **Three-region layout** (code | viewport | params); CodeMirror 6 with JS/TS highlighting.
+- **The model is now source** — the worker compiles editor text (the "code is the model" core),
+  not a bundled module. `src/models/default-model.js` is the clean default (ambient CAD API, no
+  imports, no `unwrap`). `src/kernel/cad.ts` is the authoring facade (brepjs verbatim, auto-unwrap
+  → fail loud, ambient disposal) and the surface injected into user models.
+- **Loud error region** with phase + source line; Esc dismisses.
+
+### Security sweep — code execution introduced; this is the core surface
+- **Model runs only in the worker:** PASS — compile + `build()` happen in the kernel worker
+  (no DOM, no `window`); the DOM side only sends source + params over the protocol.
+- **'unsafe-eval':** the model-compile `new Function` is the SAME worker boundary that already
+  needs eval for Embind (G0). No new exposure: the document policy stays strict.
+- **No remote-script execution:** PASS — the model is editor source, never network-fetched;
+  codegen (G4) will write into the editor and run THIS path, not eval a remote source. `script-src 'self'`.
+- **Network egress from model code:** ENFORCED by CSP `connect-src 'self'` (a model — even via a
+  nested blob worker, which inherits this policy — can't reach off-origin). Plus a best-effort
+  worker-global lockdown (`fetch`/`XHR`/`WebSocket`/`EventSource`/`importScripts` denied after
+  init) — verified: a model calling `fetch` fails loud ("geometry stays local").
+- **No telemetry:** PASS. **BYOK key:** still N/A (G4); will live main-thread, never in the worker.
+
+### Follow-ups (carried)
+- [G3] Param panel (the third region is a stub today). [G4] BYOK codegen writes into the editor.
+- [G5] Persist editor content (FSA/IndexedDB); code-split the 1 MB main bundle; self-host fonts.
+- [later] Multi-shape `build()` returns.
+
+**Verdict:** G2 clear. Editor + Run + loud-failure proven; code-execution surface contained
+(worker-only, CSP-bounded, egress-denied). No open security issue on a core surface.
+
+---
+
 ## G1 — Kernel + render core (2026-06-14)
 
 ### Tests / checks — all green

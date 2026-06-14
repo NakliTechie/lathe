@@ -1,27 +1,26 @@
 /**
  * The CAD authoring surface — the API a Lathe model writes against (model contract §4).
  *
- * It re-exports the brepjs functional API verbatim (same names, same signatures — no
- * bespoke DSL, per rule #2) with one thing woven in: every shape a model creates is
- * registered to an ambient disposal scope. `runInScope(fn)` opens that scope; when it
- * returns, the model's OCCT shape handles are deleted deterministically. (brepjs also
- * GC-collects handles via FinalizationRegistry — verified bounded over 200 builds — so
- * this scope is hygiene + lower peak memory, not the only safety net.)
+ * It is the brepjs functional API, lightly faced (rule #2 — author in JS against the
+ * chosen lib, no DSL): clean primitive/boolean names, Results auto-unwrapped so a bad
+ * operation throws *loud* (caught and surfaced, never silent-wrong, §4 doctrine), and
+ * every shape registered to an ambient disposal scope.
  *
- * This is also how user-authored model code (G2) gets the API: these exports are the
- * identifiers injected into the model's scope.
+ * `runInScope(fn)` opens that scope; on return the model's OCCT handles are deleted
+ * deterministically (brepjs also GC-collects — verified bounded over 200 builds).
+ *
+ * `cadAPI` is the same surface as a record — the identifiers injected into user model
+ * code in the worker (G2). So hand-authored and AI-authored models see one API.
  */
 import {
   box as _box,
   cylinder as _cylinder,
   sphere as _sphere,
-  cone as _cone,
   fuse as _fuse,
   cut as _cut,
   intersect as _intersect,
   fillet as _fillet,
   chamfer as _chamfer,
-  shell as _shell,
   translate as _translate,
   rotate as _rotate,
   scale as _scale,
@@ -34,17 +33,17 @@ import {
   isLive,
 } from "brepjs";
 
+/** An opaque CAD shape (a brepjs solid). Models build these and return them. */
+export type Shape = ReturnType<typeof _box>;
+export type EdgeSelector = ReturnType<typeof edgeFinder>;
+export type Vec3 = [number, number, number];
+
 interface Deletable {
   delete: () => void;
 }
-
 let current: Set<Deletable> | null = null;
 
-/**
- * Run `fn` inside an ambient disposal scope. Shapes produced by the authoring ops
- * below are deleted when `fn` returns (on success or throw). The mesh/STEP/STL bytes
- * a caller extracts before returning are plain data and survive.
- */
+/** Run `fn` inside an ambient disposal scope; shapes it creates are freed on return. */
 export function runInScope<T>(fn: () => T): T {
   const previous = current;
   const bag = new Set<Deletable>();
@@ -66,36 +65,80 @@ export function runInScope<T>(fn: () => T): T {
 function isDeletable(v: unknown): v is Deletable {
   return !!v && typeof (v as Deletable).delete === "function";
 }
-function track<T>(shape: T): T {
+function keep<T>(shape: T): T {
   if (current && isDeletable(shape)) current.add(shape);
   return shape;
 }
-function trackResult<T>(result: T): T {
-  if (isOk(result as never)) track(unwrap(result as never));
-  return result;
+/** Unwrap a Result (throws loud on Err) and track the shape. */
+function loud(result: unknown): Shape {
+  return keep(unwrap(result as never)) as Shape;
 }
 
-const wrapShape = <F extends (...a: never[]) => unknown>(fn: F): F =>
-  ((...a: never[]) => track(fn(...a))) as F;
-const wrapResult = <F extends (...a: never[]) => unknown>(fn: F): F =>
-  ((...a: never[]) => trackResult(fn(...a))) as F;
+/* ---- primitives ---- */
+export function box(width: number, depth: number, height: number): Shape {
+  return keep(_box(width, depth, height));
+}
+export function cylinder(radius: number, height: number): Shape {
+  return keep(_cylinder(radius, height));
+}
+export function sphere(radius: number): Shape {
+  return keep(_sphere(radius));
+}
 
-/* Primitives + transforms return a shape directly. */
-export const box = wrapShape(_box);
-export const cylinder = wrapShape(_cylinder);
-export const sphere = wrapShape(_sphere);
-export const cone = wrapShape(_cone);
-export const translate = wrapShape(_translate);
-export const rotate = wrapShape(_rotate);
-export const scale = wrapShape(_scale);
-export const mirror = wrapShape(_mirror);
+/* ---- transforms (brepjs option objects forwarded as-is) ---- */
+export function translate(shape: Shape, v: Vec3): Shape {
+  return keep((_translate as (s: Shape, v: Vec3) => Shape)(shape, v));
+}
+export function rotate(shape: Shape, angle: number, options?: Parameters<typeof _rotate>[2]): Shape {
+  return keep((_rotate as (s: Shape, a: number, o?: unknown) => Shape)(shape, angle, options));
+}
+export function scale(shape: Shape, factor: number, options?: Parameters<typeof _scale>[2]): Shape {
+  return keep((_scale as (s: Shape, f: number, o?: unknown) => Shape)(shape, factor, options));
+}
+export function mirror(shape: Shape, options?: Parameters<typeof _mirror>[1]): Shape {
+  return keep((_mirror as (s: Shape, o?: unknown) => Shape)(shape, options));
+}
 
-/* Booleans + edge ops return Result<Shape> — unwrap to fail loud, track the value. */
-export const fuse = wrapResult(_fuse);
-export const cut = wrapResult(_cut);
-export const intersect = wrapResult(_intersect);
-export const fillet = wrapResult(_fillet);
-export const chamfer = wrapResult(_chamfer);
-export const shell = wrapResult(_shell);
+/* ---- booleans (auto-unwrap → fail loud) ---- */
+export function fuse(a: Shape, b: Shape): Shape {
+  return loud(_fuse(a as never, b as never));
+}
+export function cut(base: Shape, tool: Shape): Shape {
+  return loud(_cut(base as never, tool as never));
+}
+export function intersect(a: Shape, b: Shape): Shape {
+  return loud(_intersect(a as never, b as never));
+}
+
+/* ---- edge ops (auto-unwrap) ---- */
+export function fillet(shape: Shape, edges: EdgeSelector, radius: number): Shape;
+export function fillet(shape: Shape, radius: number): Shape;
+export function fillet(shape: Shape, a: EdgeSelector | number, b?: number): Shape {
+  return b === undefined ? loud((_fillet as Function)(shape, a)) : loud((_fillet as Function)(shape, a, b));
+}
+export function chamfer(shape: Shape, edges: EdgeSelector, distance: number): Shape;
+export function chamfer(shape: Shape, distance: number): Shape;
+export function chamfer(shape: Shape, a: EdgeSelector | number, b?: number): Shape {
+  return b === undefined ? loud((_chamfer as Function)(shape, a)) : loud((_chamfer as Function)(shape, a, b));
+}
 
 export { edgeFinder, faceFinder, unwrap, isOk, isErr };
+
+/** The authoring API as a record — injected into user model code in the worker. */
+export const cadAPI = {
+  box,
+  cylinder,
+  sphere,
+  translate,
+  rotate,
+  scale,
+  mirror,
+  fuse,
+  cut,
+  intersect,
+  fillet,
+  chamfer,
+  edgeFinder,
+  faceFinder,
+  unwrap,
+} as const;

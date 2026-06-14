@@ -1,4 +1,4 @@
-/* Lathe — design tokens (handoff §6) + G0 spike shell.
+/* Lathe — design tokens (handoff §6) + workbench shell.
    Calm, craft, technical-but-warm. Dark default; brass/amber accent. */
 :root {
   --surface-0: #16161a;
@@ -37,65 +37,150 @@ body {
   overflow: hidden;
 }
 
-#app { position: fixed; inset: 0; }
+/* App is a three-row grid: topbar · workbench · statusbar. Boot overlays it. */
+#app {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
 
-/* Viewport canvas fills the app; HUD floats above it. */
+/* ---- top bar ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 1.5);
+  padding: calc(var(--space) * 1.25) calc(var(--space) * 2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  z-index: 5;
+}
+.brand {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+.brand .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-dim);
+}
+.brand .tag { color: var(--text-dim); font-weight: 400; font-size: 12px; }
+.spacer { flex: 1; }
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: calc(var(--space) * 0.75) calc(var(--space) * 1.5);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space) * 0.75);
+}
+.btn:hover { border-color: var(--accent-dim); background: var(--surface-0); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn svg { width: 16px; height: 16px; }
+.btn-run {
+  color: #1a1206;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.btn-run:hover { background: #e8a64a; border-color: #e8a64a; }
+
+/* ---- workbench: code | viewport | params ---- */
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(280px, 30vw) 1fr minmax(220px, 18vw);
+  min-height: 0;
+}
+.pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.pane-code { border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.pane-viewport { background: var(--surface-0); }
+.pane-params { border-left: 1px solid var(--border); background: var(--surface-1); padding: calc(var(--space) * 1.5); overflow-y: auto; }
+
+#editor { flex: 1; min-height: 0; overflow: hidden; }
+#editor .cm-editor { height: 100%; }
+
 #viewport { position: absolute; inset: 0; }
 #viewport canvas { display: block; outline: none; }
 
-/* Boot overlay */
+.pane-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: var(--space);
+}
+.params-hint { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 0; }
+.params-hint code { font-family: var(--font-mono); color: var(--accent); }
+
+/* ---- error region (loud failure, never silent) ---- */
+.error-region {
+  border-top: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-1));
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: calc(var(--space) * 1.25) calc(var(--space) * 1.5);
+  max-height: 38%;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.error-region[hidden] { display: none; }
+.error-where {
+  display: inline-block;
+  color: var(--danger);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: var(--space);
+}
+.error-msg { color: var(--text); }
+
+/* ---- status bar ---- */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+  padding: calc(var(--space) * 1) calc(var(--space) * 2);
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.statusbar.is-error { color: var(--danger); }
+.statusbar .led { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.statusbar.is-ok .led { background: var(--ok); }
+.statusbar.is-error .led { background: var(--danger); }
+
+/* ---- boot overlay ---- */
 .boot {
-  position: absolute; inset: 0; z-index: 20;
-  display: flex; flex-direction: column; gap: var(--space);
-  align-items: center; justify-content: center;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  align-items: center;
+  justify-content: center;
   background: var(--surface-0);
   transition: opacity 0.4s ease;
 }
 .boot.hidden { opacity: 0; pointer-events: none; }
 .boot-mark { font-size: 28px; font-weight: 600; letter-spacing: 0.02em; }
-.boot-mark::after { content: ""; }
 .boot-status { color: var(--text-dim); font-size: 13px; font-family: var(--font-mono); }
-
-/* Top bar */
-.topbar {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
-  display: flex; align-items: center; gap: calc(var(--space) * 1.5);
-  padding: calc(var(--space) * 1.25) calc(var(--space) * 2);
-  background: linear-gradient(var(--surface-0), transparent);
-  pointer-events: none;
-}
-.topbar > * { pointer-events: auto; }
-.brand {
-  font-weight: 600; font-size: 15px; letter-spacing: 0.02em;
-  display: flex; align-items: center; gap: var(--space);
-}
-.brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent-dim); }
-.brand .tag { color: var(--text-dim); font-weight: 400; font-size: 12px; }
-.spacer { flex: 1; }
-
-.btn {
-  font: inherit; font-size: 13px;
-  color: var(--text); background: var(--surface-1);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: calc(var(--space) * 0.75) calc(var(--space) * 1.5);
-  cursor: pointer; transition: border-color 0.15s, background 0.15s;
-  display: inline-flex; align-items: center; gap: calc(var(--space) * 0.75);
-}
-.btn:hover { border-color: var(--accent-dim); background: var(--surface-2); }
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn svg { width: 16px; height: 16px; }
-
-/* Status bar (aria-live) */
-.statusbar {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: flex; align-items: center; gap: var(--space);
-  padding: calc(var(--space) * 1.25) calc(var(--space) * 2);
-  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
-  background: linear-gradient(transparent, var(--surface-0));
-  pointer-events: none;
-}
-.statusbar.is-error { color: var(--danger); }
-.statusbar.is-ok .led { background: var(--ok); }
-.statusbar .led { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
-.statusbar.is-error .led { background: var(--danger); }

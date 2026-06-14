@@ -19,10 +19,18 @@ export interface InitRequest {
   id: number;
   kind: "init";
 }
+/** Compile model source, make it the current model, and build it. The editor's Run. */
+export interface RunRequest {
+  id: number;
+  kind: "run";
+  source: string;
+  /** Overrides merged over the model's declared defaults (empty = use defaults). */
+  params: Params;
+}
 export interface BuildRequest {
   id: number;
   kind: "build";
-  /** Overrides merged over the model's declared defaults. */
+  /** Re-run the *current* model with these param overrides (param-panel edits). */
   params: Params;
 }
 export interface ExportRequest {
@@ -31,7 +39,7 @@ export interface ExportRequest {
   format: "step" | "stl";
   params: Params;
 }
-export type Request = InitRequest | BuildRequest | ExportRequest;
+export type Request = InitRequest | RunRequest | BuildRequest | ExportRequest;
 
 /* ---- responses (worker → main) ---- */
 
@@ -61,6 +69,15 @@ export interface BuildOk {
   /** Wall-clock build+mesh time in ms. */
   ms: number;
 }
+export interface RunOk {
+  id: number;
+  ok: true;
+  kind: "run";
+  geometry: GeometryPayload;
+  /** The model's declared `params` defaults — drives the param panel (G3). */
+  params: Params;
+  ms: number;
+}
 export interface ExportOk {
   id: number;
   ok: true;
@@ -78,5 +95,9 @@ export interface Failure {
   kind: Request["kind"];
   /** Human-readable error — surfaced loudly, never swallowed. */
   error: string;
+  /** Which stage failed, for the error region. */
+  phase?: "compile" | "build" | "mesh" | "export";
+  /** 1-based source line, when the error carries a location (compile errors). */
+  line?: number;
 }
-export type Response = InitOk | BuildOk | ExportOk | Failure;
+export type Response = InitOk | RunOk | BuildOk | ExportOk | Failure;
