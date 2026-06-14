@@ -6,6 +6,46 @@ be deferred. Newest gate first.
 
 ---
 
+## Post-v1.0 — AI providers + on-device WebGPU sidecar (2026-06-14, commit 1871b5f)
+
+### Tests / checks — all green
+- `pnpm typecheck` clean; `pnpm build` green (WebLLM in a **separate lazy chunk**, ~6 MB — loaded
+  only when the WebGPU provider is used; main bundle unchanged at 314 KB gz).
+- In browser: provider panel shows Anthropic / OpenAI / Custom·Local / Local-WebGPU; switching to
+  Custom reveals the editable endpoint (prefilled Ollama URL); WebGPU disables itself when
+  `navigator.gpu` is absent.
+- **On-device generation verified end-to-end on a real GPU** (Apple Metal-3, `shader-f16`):
+  Qwen2.5-Coder-1.5B downloaded, ran on the GPU, generated valid Lathe code → a plate-with-hole
+  rendered ("1 solid · 7 faces · 64 triangles"). The weaker 0.5B model's output **failed loud**
+  via the G2 kernel-error path (`FILLET_FAILED`) — the safety property, not silent-wrong.
+
+### What this delivered
+- `src/codegen/providers.ts` — provider registry: Anthropic (Messages API), OpenAI (Chat
+  Completions), Custom/Local (any OpenAI-compatible endpoint, key optional), Local-WebGPU.
+- `src/codegen/vault.ts` — VaultMind keys now **per provider** (IndexedDB).
+- `src/codegen/generate.ts` — routes by provider API; OpenAI-compatible shares one path.
+- `src/codegen/webgpu.ts` — WebLLM engine, lazy-loaded, runs on the main thread (so weights fetch
+  is under the document CSP; the kernel worker stays egress-locked).
+
+### Security sweep
+- **WebLLM runs under the STRICT document CSP** — `wasm-unsafe-eval` only, **no `unsafe-eval`**
+  (verified: no CSP violation on a successful on-device run). The §8 document-strict invariant
+  holds; the local sidecar did not require relaxing it.
+- **`connect-src` broadened (documented, deliberate):** the document policy now allows
+  `https: http://localhost:* http://127.0.0.1:*` — because the codegen endpoint is now the user's
+  explicit choice (custom/local endpoints, on-device weights). This relaxes §8's "pin specific
+  provider hosts" by design (you can't pin a host you let the user type). The **kernel worker
+  stays `connect-src 'self'`**; keys never reach the worker; geometry is never part of any request.
+- **Sovereignty net gain:** the WebGPU option means codegen *and* geometry can be 100% on-device.
+
+### Note
+- Small local models are weak at CAD code (handoff's prediction confirmed): 0.5B mangled structure;
+  1.5B produced a valid-but-rough part. Cloud (Anthropic/OpenAI) remains the quality default; the
+  on-device rung is the sovereign option. OpenAI direct-from-browser may hit CORS — the Custom
+  endpoint (OpenRouter / local proxy) is the robust route for OpenAI-style APIs.
+
+---
+
 ## G5 — Persistence + polish + ship (2026-06-14)
 
 ### Tests / checks — all green
