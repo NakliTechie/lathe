@@ -22,7 +22,9 @@ const DOC_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  "connect-src 'self' ws: wss:",
+  // BYOK codegen calls the provider directly from the main thread (G4). The worker
+  // stays 'self' — it never makes the codegen call and never sees the key.
+  "connect-src 'self' ws: wss: https://api.anthropic.com",
   "img-src 'self' data: blob:",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",

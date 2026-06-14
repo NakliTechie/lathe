@@ -8,6 +8,8 @@ import "./styles.css";
 import { Viewport } from "./render/viewport";
 import { createEditor, getDoc } from "./editor/editor";
 import { createParamPanel, type ParamPanel } from "./params/panel";
+import { generateModel, MODELS, DEFAULT_MODEL } from "./codegen/generate";
+import { getFingerprint, setKey, clearKey } from "./codegen/vault";
 import defaultModel from "./models/default-model.js?raw";
 import type { EditorView } from "@codemirror/view";
 import type { Request, Response, Params, ParamValue, Failure } from "./kernel/protocol";
@@ -25,6 +27,24 @@ app.insertAdjacentHTML(
   </header>
   <main class="workbench">
     <section class="pane pane-code">
+      <div class="prompt-bar">
+        <input id="prompt" class="prompt-input" type="text" autocomplete="off" spellcheck="false"
+          placeholder="Describe a part — e.g. a 40×20 bracket with two M4 holes"
+          aria-label="Describe a part for the AI to model" />
+        <button class="btn btn-accent" id="generate">${icon("sparkles")} Generate</button>
+        <button class="btn btn-icon" id="key-btn" aria-label="API key settings" title="API key">${icon("key")}</button>
+        <div class="key-panel" id="key-panel" hidden>
+          <label class="key-label" for="key-input">Anthropic API key — bring your own</label>
+          <input id="key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." />
+          <label class="key-label" for="model-select">Model</label>
+          <select id="model-select" class="param-select"></select>
+          <div class="key-actions">
+            <button class="btn btn-accent" id="key-save">Save key</button>
+            <button class="btn btn-ghost" id="key-clear" hidden>Clear</button>
+          </div>
+          <p class="key-note" id="key-note"></p>
+        </div>
+      </div>
       <div id="editor" aria-label="Model code"></div>
       <div class="error-region" id="error" role="alert" hidden></div>
     </section>
@@ -53,6 +73,15 @@ const stepBtn = document.getElementById("export-step") as HTMLButtonElement;
 const stlBtn = document.getElementById("export-stl") as HTMLButtonElement;
 const paramsBody = document.getElementById("params")!;
 const saveParamsBtn = document.getElementById("save-params") as HTMLButtonElement;
+const promptInput = document.getElementById("prompt") as HTMLInputElement;
+const generateBtn = document.getElementById("generate") as HTMLButtonElement;
+const keyBtn = document.getElementById("key-btn") as HTMLButtonElement;
+const keyPanel = document.getElementById("key-panel")!;
+const keyInput = document.getElementById("key-input") as HTMLInputElement;
+const modelSelect = document.getElementById("model-select") as HTMLSelectElement;
+const keySaveBtn = document.getElementById("key-save") as HTMLButtonElement;
+const keyClearBtn = document.getElementById("key-clear") as HTMLButtonElement;
+const keyNote = document.getElementById("key-note")!;
 
 const viewport = new Viewport(document.getElementById("viewport")!);
 const editor: EditorView = createEditor(document.getElementById("editor")!, defaultModel, () => void runModel());
@@ -178,9 +207,91 @@ saveParamsBtn.addEventListener("click", () => {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: updated } });
   setStatus("Saved current parameters into your code", "ok");
 });
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") clearError();
+/* ---- BYOK codegen + VaultMind key (G4) ---- */
+const MODEL_PREF = "lathe.byok.model";
+let currentModel = localStorage.getItem(MODEL_PREF) ?? DEFAULT_MODEL;
+for (const m of MODELS) {
+  const opt = document.createElement("option");
+  opt.value = m.id;
+  opt.textContent = m.label;
+  modelSelect.appendChild(opt);
+}
+modelSelect.value = currentModel;
+modelSelect.addEventListener("change", () => {
+  currentModel = modelSelect.value;
+  localStorage.setItem(MODEL_PREF, currentModel);
 });
+
+function refreshKeyUI(): void {
+  const fp = getFingerprint();
+  keyBtn.classList.toggle("has-key", !!fp);
+  keyClearBtn.hidden = !fp;
+  keyNote.textContent = `${fp ? `Key ${fp} stored` : "Stored"} in your browser only (IndexedDB) — sent only to your AI provider, never to Lathe.`;
+}
+refreshKeyUI();
+
+keyBtn.addEventListener("click", () => {
+  keyPanel.hidden = !keyPanel.hidden;
+  if (!keyPanel.hidden) keyInput.focus();
+});
+keySaveBtn.addEventListener("click", async () => {
+  const v = keyInput.value.trim();
+  if (!v) return;
+  await setKey(v);
+  keyInput.value = "";
+  refreshKeyUI();
+  keyPanel.hidden = true;
+  setStatus("API key saved — it stays in your browser.", "ok");
+});
+keyClearBtn.addEventListener("click", async () => {
+  await clearKey();
+  refreshKeyUI();
+  setStatus("API key cleared.", "ok");
+});
+
+async function generate(): Promise<void> {
+  const prompt = promptInput.value.trim();
+  if (!prompt) {
+    promptInput.focus();
+    return;
+  }
+  if (!getFingerprint()) {
+    keyPanel.hidden = false;
+    keyInput.focus();
+    setStatus("Add your Anthropic API key to generate.", "error");
+    return;
+  }
+  const label = MODELS.find((m) => m.id === currentModel)?.label ?? currentModel;
+  generateBtn.disabled = true;
+  setStatus(`Generating with ${label}…`);
+  try {
+    const code = await generateModel({ model: currentModel, prompt });
+    setEditorSource(code);
+    await runModel(); // a bad generation fails loud via the G2 error path
+  } catch (err) {
+    setStatus(`Generation failed — ${message(err)}`, "error");
+  } finally {
+    generateBtn.disabled = false;
+  }
+}
+generateBtn.addEventListener("click", () => void generate());
+promptInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void generate();
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    clearError();
+    keyPanel.hidden = true;
+  }
+});
+
+function setEditorSource(src: string): void {
+  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: src } });
+}
 
 // Programmatic surface — the seed of the v1.1 agent face (§11).
 declare global {
@@ -199,8 +310,7 @@ window.lathe = {
     const res = await call({ kind: "build", params: currentParams });
     if (res.ok && res.kind === "build") viewport.setGeometry(res.geometry);
   },
-  setSource: (src: string) =>
-    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: src } }),
+  setSource: (src: string) => setEditorSource(src),
 };
 
 /* ---- helpers ---- */
@@ -268,12 +378,14 @@ function escapeHtml(s: string): string {
 }
 
 /** Minimal inline Lucide-style glyphs (one icon set, currentColor). */
-function icon(name: "play" | "box" | "download" | "save"): string {
+function icon(name: "play" | "box" | "download" | "save" | "sparkles" | "key"): string {
   const paths: Record<string, string> = {
     play: '<polygon points="6 3 20 12 6 21 6 3"/>',
     box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
     save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+    sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
+    key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }

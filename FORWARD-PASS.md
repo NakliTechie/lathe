@@ -6,6 +6,53 @@ be deferred. Newest gate first.
 
 ---
 
+## G4 — Codegen (BYOK) (2026-06-14)
+
+### Tests / checks — all green
+- `pnpm typecheck`: clean. `pnpm build`: green (+8 KB codegen, all main-thread; worker unchanged).
+- `pnpm verify`: 16/16.
+- In browser: prompt bar + key panel render; the VaultMind key flow works — a key saves to
+  IndexedDB, its fingerprint (`4c2fab08`, a SHA-256 prefix — *not* the key) shows in the UI, and
+  Clear removes both. **Pipeline proven with a deliberately fake key:** Generate → a real
+  `401 Invalid API key` surfaced loudly (not a network error), which proves CSP, CORS, the
+  `anthropic-dangerous-direct-browser-access` header, the request shape, and error handling all
+  work end to end. No CSP violation logged.
+- **Real generation is the human smoke-test** (handoff names G4 a smoke-test point): with a valid
+  key, "a 40×20 bracket with two M4 holes" → a running model. Only a valid key stands between the
+  verified pipeline and that result.
+
+### What G4 delivered
+- `src/codegen/generate.ts` — BYOK codegen (the `nakli-ai` routing convention realized locally;
+  it's not a package, handoff §12). Raw `fetch` to `api.anthropic.com` (no heavy SDK in a
+  bundle-sensitive sovereign app); model picker (Opus 4.8 default, honest cloud C1); adaptive
+  thinking; a system prompt that teaches the model contract + the CAD API + coordinate conventions
+  + an M-bolt hint + a worked bracket example; robust fenced-code extraction.
+- `src/codegen/vault.ts` — VaultMind (§7): key in IndexedDB, fingerprint in localStorage.
+- Generated code → editor → Run; a bad generation fails loud via the G2 compile/build path.
+
+### Security sweep — BYOK key handling is the core surface; not deferred
+- **VaultMind key (§7):** PASS — key in **IndexedDB** (never localStorage, never any server);
+  only the recognition **fingerprint** (hash prefix) is in localStorage; the key is read on the
+  **main thread only** and is **never sent to the kernel worker**; it leaves the browser only on
+  the direct request to the user's chosen provider (there is no Lathe server). Verified store /
+  fingerprint / clear.
+- **No telemetry / phone-home:** PASS — the only external origin is `api.anthropic.com` (the
+  user's provider), pinned in `connect-src` on the **document** policy only; the worker stays
+  `connect-src 'self'`.
+- **No remote-script execution:** PASS — generated code is written into the editor and run through
+  the worker path, never eval'd from the network (rule #5).
+- **CSP:** document `connect-src` adds `https://api.anthropic.com`; worker policy unchanged;
+  verified the live call raised no CSP violation.
+
+### Follow-ups (carried)
+- [G5] persist editor content + key UX polish; help modal; a11y pass; self-host fonts; code-split.
+- [human] real-key smoke test of generation quality.
+
+**Verdict:** G4 clear. BYOK codegen wired; the key-handling surface is VaultMind-compliant and
+verified; the network path is CSP-bounded and proven. No open security issue on a core surface.
+
+---
+
 ## G3 — Param panel (2026-06-14)
 
 ### Tests / checks — all green
