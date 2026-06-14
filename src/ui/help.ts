@@ -21,9 +21,11 @@ const HELP_HTML = `
     live; <strong>Save to code</strong> writes the current value back into your source.</p>
   </section>
   <section class="help-section">
-    <h3>Your key stays local</h3>
-    <p>Bring your own key. It is stored in your browser only (IndexedDB) and sent only to your AI
-    provider — never to any Lathe server. A short fingerprint is shown so you can recognise it.</p>
+    <h3>Pick your AI</h3>
+    <p>Behind the <strong>🔑</strong> button: Anthropic, OpenAI, any OpenAI-compatible endpoint
+    (a local Ollama / LM Studio, OpenRouter, …), or a small coder model that runs <strong>on your
+    GPU</strong> in this tab. Cloud keys are stored in your browser only (IndexedDB) and sent only
+    to that provider — never to any Lathe server. The on-device option needs no key, no network.</p>
   </section>
   <section class="help-section">
     <h3>Where files go</h3>
@@ -32,8 +34,8 @@ const HELP_HTML = `
   </section>
   <section class="help-section">
     <h3>What runs where</h3>
-    <p>The CAD kernel runs in your browser tab. Geometry never leaves your machine — nothing is
-    uploaded. No accounts, no telemetry.</p>
+    <p>The CAD kernel runs in your browser tab; geometry never leaves your machine. With the WebGPU
+    model, even codegen is fully local. No accounts, no telemetry.</p>
   </section>
 `;
 

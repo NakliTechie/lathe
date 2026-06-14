@@ -45,12 +45,19 @@ export function build(p) {
 The same `build(params)` → kernel pipeline runs headlessly too — it's the basis of the v1.1 agent
 face (drive Lathe from Claude Code / Cursor over an MCP surface).
 
-## Bring your own key
+## Bring your own AI
 
-Codegen uses your own cloud model (Anthropic). Your key is stored **in your browser only**
-(IndexedDB) and is sent **only to your AI provider** — never to any Lathe server (there is none).
-A short fingerprint is shown so you can recognise the stored key. Geometry is never part of any
-request: the kernel runs locally regardless.
+Pick where codegen runs (behind the 🔑 button):
+
+- **Anthropic** or **OpenAI** — bring your key.
+- **Custom / Local** — any OpenAI-compatible endpoint you type in: a local Ollama / LM Studio
+  server (`http://localhost:11434/v1/…`), OpenRouter, Together, Groq, … (key optional).
+- **Local (WebGPU)** — a small coder model (Qwen2.5-Coder) runs **on your GPU, in the tab**. No
+  key, and no network for inference: weights download once, then it's fully on-device.
+
+Cloud keys are stored **in your browser only** (IndexedDB, one per provider) and sent **only to
+that provider** — never to any Lathe server (there is none). A short fingerprint is shown for
+recognition. Geometry is never part of any request: the kernel runs locally regardless.
 
 ## Browser support
 

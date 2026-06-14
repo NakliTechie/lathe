@@ -22,9 +22,11 @@ const DOC_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  // BYOK codegen calls the provider directly from the main thread (G4). The worker
-  // stays 'self' — it never makes the codegen call and never sees the key.
-  "connect-src 'self' ws: wss: https://api.anthropic.com",
+  // Codegen runs on the main thread and talks to a user-configured provider (any cloud
+  // API, a local OpenAI-compatible endpoint, or on-device WebGPU weights). The endpoint
+  // is the user's explicit choice, so connect-src is broad here — https: + localhost.
+  // The kernel worker stays 'self' (it never makes these calls and never sees a key).
+  "connect-src 'self' https: http://localhost:* http://127.0.0.1:* ws: wss:",
   "img-src 'self' data: blob:",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",

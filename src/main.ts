@@ -8,8 +8,9 @@ import "./styles.css";
 import { Viewport } from "./render/viewport";
 import { createEditor, getDoc, setEditorTheme } from "./editor/editor";
 import { createParamPanel, type ParamPanel } from "./params/panel";
-import { generateModel, MODELS, DEFAULT_MODEL } from "./codegen/generate";
-import { getFingerprint, setKey, clearKey } from "./codegen/vault";
+import { generateModel } from "./codegen/generate";
+import { PROVIDERS, getProvider, hasWebGPU, DEFAULT_PROVIDER, type ProviderId } from "./codegen/providers";
+import { getKey, getFingerprint, setKey, clearKey } from "./codegen/vault";
 import { openModel, saveModel, saveDraft, loadDraft } from "./persist/files";
 import { openHelp } from "./ui/help";
 import defaultModel from "./models/default-model.js?raw";
@@ -40,13 +41,18 @@ app.insertAdjacentHTML(
         <button class="btn btn-accent" id="generate">${icon("sparkles")} Generate</button>
         <button class="btn btn-icon" id="key-btn" aria-label="API key settings" title="API key">${icon("key")}</button>
         <div class="key-panel" id="key-panel" hidden>
-          <label class="key-label" for="key-input">Anthropic API key — bring your own</label>
-          <input id="key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." />
-          <label class="key-label" for="model-select">Model</label>
-          <select id="model-select" class="param-select"></select>
+          <label class="key-label" for="provider-select">AI provider</label>
+          <select id="provider-select" class="param-select"></select>
+          <label class="key-label" for="endpoint-input" id="endpoint-label" hidden>Endpoint</label>
+          <input id="endpoint-input" class="key-input" type="text" spellcheck="false" autocomplete="off" hidden placeholder="https://host/v1/chat/completions" />
+          <label class="key-label" for="model-input">Model</label>
+          <input id="model-input" class="key-input" list="model-list" spellcheck="false" autocomplete="off" />
+          <datalist id="model-list"></datalist>
+          <label class="key-label" for="key-input" id="key-label">API key</label>
+          <input id="key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." />
           <div class="key-actions">
-            <button class="btn btn-accent" id="key-save">Save key</button>
-            <button class="btn btn-ghost" id="key-clear" hidden>Clear</button>
+            <button class="btn btn-accent" id="key-save">Save</button>
+            <button class="btn btn-ghost" id="key-clear" hidden>Clear key</button>
           </div>
           <p class="key-note" id="key-note"></p>
         </div>
@@ -88,7 +94,12 @@ const generateBtn = document.getElementById("generate") as HTMLButtonElement;
 const keyBtn = document.getElementById("key-btn") as HTMLButtonElement;
 const keyPanel = document.getElementById("key-panel")!;
 const keyInput = document.getElementById("key-input") as HTMLInputElement;
-const modelSelect = document.getElementById("model-select") as HTMLSelectElement;
+const keyLabel = document.getElementById("key-label")!;
+const providerSelect = document.getElementById("provider-select") as HTMLSelectElement;
+const endpointInput = document.getElementById("endpoint-input") as HTMLInputElement;
+const endpointLabel = document.getElementById("endpoint-label")!;
+const modelInput = document.getElementById("model-input") as HTMLInputElement;
+const modelList = document.getElementById("model-list") as HTMLDataListElement;
 const keySaveBtn = document.getElementById("key-save") as HTMLButtonElement;
 const keyClearBtn = document.getElementById("key-clear") as HTMLButtonElement;
 const keyNote = document.getElementById("key-note")!;
@@ -265,45 +276,84 @@ saveParamsBtn.addEventListener("click", () => {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: updated } });
   setStatus("Saved current parameters into your code", "ok");
 });
-/* ---- BYOK codegen + VaultMind key (G4) ---- */
-const MODEL_PREF = "lathe.byok.model";
-let currentModel = localStorage.getItem(MODEL_PREF) ?? DEFAULT_MODEL;
-for (const m of MODELS) {
-  const opt = document.createElement("option");
-  opt.value = m.id;
-  opt.textContent = m.label;
-  modelSelect.appendChild(opt);
-}
-modelSelect.value = currentModel;
-modelSelect.addEventListener("change", () => {
-  currentModel = modelSelect.value;
-  localStorage.setItem(MODEL_PREF, currentModel);
-});
+/* ---- codegen: provider config + VaultMind keys (multi-provider) ---- */
+const PROVIDER_PREF = "lathe.provider";
+const endpointPref = (id: ProviderId): string => `lathe.endpoint.${id}`;
+const modelPref = (id: ProviderId): string => `lathe.model.${id}`;
 
-function refreshKeyUI(): void {
-  const fp = getFingerprint();
-  keyBtn.classList.toggle("has-key", !!fp);
-  keyClearBtn.hidden = !fp;
-  keyNote.textContent = `${fp ? `Key ${fp} stored` : "Stored"} in your browser only (IndexedDB) — sent only to your AI provider, never to Lathe.`;
+let providerId = (localStorage.getItem(PROVIDER_PREF) as ProviderId | null) ?? DEFAULT_PROVIDER;
+const webgpuOk = hasWebGPU();
+
+for (const p of PROVIDERS) {
+  const opt = document.createElement("option");
+  opt.value = p.id;
+  opt.textContent = p.id === "webgpu" && !webgpuOk ? `${p.label} — unavailable here` : p.label;
+  opt.disabled = p.id === "webgpu" && !webgpuOk;
+  providerSelect.appendChild(opt);
 }
-refreshKeyUI();
+if (providerId === "webgpu" && !webgpuOk) providerId = DEFAULT_PROVIDER;
+providerSelect.value = providerId;
+
+function resolvedEndpoint(p = getProvider(providerId)): string {
+  return p.endpointEditable ? localStorage.getItem(endpointPref(p.id)) || p.defaultEndpoint : p.defaultEndpoint;
+}
+function resolvedModel(p = getProvider(providerId)): string {
+  return localStorage.getItem(modelPref(p.id)) || p.models[0]?.id || "";
+}
+
+function syncProviderUI(): void {
+  const p = getProvider(providerId);
+  endpointInput.hidden = !p.endpointEditable;
+  endpointLabel.hidden = !p.endpointEditable;
+  endpointInput.value = resolvedEndpoint(p);
+
+  modelList.innerHTML = "";
+  for (const m of p.models) {
+    const o = document.createElement("option");
+    o.value = m.id;
+    o.label = m.label;
+    modelList.appendChild(o);
+  }
+  modelInput.value = resolvedModel(p);
+
+  const keyHidden = p.api === "webgpu";
+  keyInput.hidden = keyHidden;
+  keyLabel.hidden = keyHidden;
+  keyLabel.textContent = p.needsKey ? "API key" : "API key (optional)";
+  const fp = getFingerprint(p.id);
+  keyClearBtn.hidden = keyHidden || !fp;
+  keyBtn.classList.toggle("has-key", keyHidden ? webgpuOk : !!fp);
+  keyNote.textContent = (fp ? `Key ${fp} · ` : "") + p.note;
+}
+syncProviderUI();
+
+providerSelect.addEventListener("change", () => {
+  providerId = providerSelect.value as ProviderId;
+  localStorage.setItem(PROVIDER_PREF, providerId);
+  syncProviderUI();
+});
+endpointInput.addEventListener("change", () => localStorage.setItem(endpointPref(providerId), endpointInput.value.trim()));
+modelInput.addEventListener("change", () => localStorage.setItem(modelPref(providerId), modelInput.value.trim()));
 
 keyBtn.addEventListener("click", () => {
   keyPanel.hidden = !keyPanel.hidden;
-  if (!keyPanel.hidden) keyInput.focus();
+  if (!keyPanel.hidden) (keyInput.hidden ? providerSelect : keyInput).focus();
 });
 keySaveBtn.addEventListener("click", async () => {
+  localStorage.setItem(modelPref(providerId), modelInput.value.trim());
+  if (getProvider(providerId).endpointEditable) localStorage.setItem(endpointPref(providerId), endpointInput.value.trim());
   const v = keyInput.value.trim();
-  if (!v) return;
-  await setKey(v);
-  keyInput.value = "";
-  refreshKeyUI();
+  if (v) {
+    await setKey(providerId, v);
+    keyInput.value = "";
+  }
+  syncProviderUI();
   keyPanel.hidden = true;
-  setStatus("API key saved — it stays in your browser.", "ok");
+  setStatus("Saved — keys stay in your browser.", "ok");
 });
 keyClearBtn.addEventListener("click", async () => {
-  await clearKey();
-  refreshKeyUI();
+  await clearKey(providerId);
+  syncProviderUI();
   setStatus("API key cleared.", "ok");
 });
 
@@ -313,17 +363,23 @@ async function generate(): Promise<void> {
     promptInput.focus();
     return;
   }
-  if (!getFingerprint()) {
+  const p = getProvider(providerId);
+  if (p.needsKey && !getFingerprint(providerId)) {
     keyPanel.hidden = false;
     keyInput.focus();
-    setStatus("Add your Anthropic API key to generate.", "error");
+    setStatus(`Add your ${p.label} API key to generate.`, "error");
     return;
   }
-  const label = MODELS.find((m) => m.id === currentModel)?.label ?? currentModel;
   generateBtn.disabled = true;
-  setStatus(`Generating with ${label}…`);
+  setStatus(`Generating with ${p.label}…`);
   try {
-    const code = await generateModel({ model: currentModel, prompt });
+    const code = await generateModel(prompt, {
+      provider: providerId,
+      endpoint: resolvedEndpoint(p),
+      model: modelInput.value.trim() || resolvedModel(p),
+      key: p.api === "webgpu" ? null : await getKey(providerId),
+      onProgress: (m) => setStatus(m),
+    });
     setEditorSource(code);
     await runModel(); // a bad generation fails loud via the G2 error path
   } catch (err) {
