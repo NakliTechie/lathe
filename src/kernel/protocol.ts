@@ -10,8 +10,13 @@
 
 export type Vec3 = [number, number, number];
 
-/** Params are a flat record of JSON-serialisable primitives (model contract §4). */
-export type Params = Record<string, number | boolean | string>;
+/**
+ * A param value. Primitives become controls directly; a `string[]` declares an enum
+ * (rendered as a select, default = first). build() always receives the resolved scalar.
+ */
+export type ParamValue = number | boolean | string | string[];
+/** Params are a flat record (model contract §4). */
+export type Params = Record<string, ParamValue>;
 
 /* ---- requests (main → worker) ---- */
 

@@ -7,9 +7,10 @@
 import "./styles.css";
 import { Viewport } from "./render/viewport";
 import { createEditor, getDoc } from "./editor/editor";
+import { createParamPanel, type ParamPanel } from "./params/panel";
 import defaultModel from "./models/default-model.js?raw";
 import type { EditorView } from "@codemirror/view";
-import type { Request, Response, Params, Failure } from "./kernel/protocol";
+import type { Request, Response, Params, ParamValue, Failure } from "./kernel/protocol";
 
 const app = document.getElementById("app")!;
 app.insertAdjacentHTML(
@@ -29,9 +30,12 @@ app.insertAdjacentHTML(
     </section>
     <section class="pane pane-viewport"><div id="viewport"></div></section>
     <aside class="pane pane-params">
-      <div class="pane-title">Parameters</div>
+      <div class="params-header">
+        <div class="pane-title">Parameters</div>
+        <button class="btn btn-ghost" id="save-params" disabled aria-label="Write current parameter values back into your code">${icon("save")} Save to code</button>
+      </div>
       <div id="params" class="params-body">
-        <p class="params-hint">Param controls arrive in G3. For now, edit the <code>params</code> object and Run.</p>
+        <p class="params-hint">Run a model — its <code>params</code> become controls here.</p>
       </div>
     </aside>
   </main>
@@ -47,6 +51,8 @@ const errorEl = document.getElementById("error")!;
 const runBtn = document.getElementById("run") as HTMLButtonElement;
 const stepBtn = document.getElementById("export-step") as HTMLButtonElement;
 const stlBtn = document.getElementById("export-stl") as HTMLButtonElement;
+const paramsBody = document.getElementById("params")!;
+const saveParamsBtn = document.getElementById("save-params") as HTMLButtonElement;
 
 const viewport = new Viewport(document.getElementById("viewport")!);
 const editor: EditorView = createEditor(document.getElementById("editor")!, defaultModel, () => void runModel());
@@ -80,14 +86,16 @@ function call(req: ReqNoId): Promise<Response> {
 }
 
 /* ---- flow ---- */
-let currentParams: Params = {}; // param overrides (G3 will populate from the panel)
+let currentParams: Params = {}; // the panel's current values (overrides over model defaults)
+let panel: ParamPanel | null = null;
 let canExport = false;
+let buildSeq = 0;
+let liveTimer = 0;
 
 /** Compile + build the editor's source. The editor's Run, and the boot path. */
 async function runModel(): Promise<void> {
-  currentParams = {};
   setStatus("Running…");
-  const res = await call({ kind: "run", source: getDoc(editor), params: currentParams });
+  const res = await call({ kind: "run", source: getDoc(editor), params: {} });
   if (!res.ok) {
     showError(res);
     return;
@@ -95,14 +103,43 @@ async function runModel(): Promise<void> {
   if (res.kind !== "run") return;
   clearError();
   viewport.setGeometry(res.geometry);
-  const g = res.geometry;
-  setStatus(
-    `${g.solidCount} solid · ${g.faceCount} faces · ${g.triangleCount.toLocaleString()} triangles · ${Math.round(res.ms)} ms`,
-    "ok",
-  );
+  // Introspect the model's declared params into controls; edits re-run live.
+  panel = createParamPanel(paramsBody, res.params, onParamInput);
+  currentParams = panel.values();
+  saveParamsBtn.disabled = false;
+  showStats(res.geometry, res.ms);
   canExport = true;
   stepBtn.disabled = false;
   stlBtn.disabled = false;
+}
+
+function onParamInput(): void {
+  if (!panel) return;
+  currentParams = panel.values();
+  clearTimeout(liveTimer);
+  liveTimer = self.setTimeout(() => void liveBuild(), 24);
+}
+
+/** Re-run the current model with the panel's params (no recompile). Latest build wins. */
+async function liveBuild(): Promise<void> {
+  const seq = ++buildSeq;
+  const res = await call({ kind: "build", params: currentParams });
+  if (seq !== buildSeq) return; // superseded by a newer edit
+  if (!res.ok) {
+    showError(res);
+    return;
+  }
+  if (res.kind !== "build") return;
+  clearError();
+  viewport.setGeometry(res.geometry);
+  showStats(res.geometry, res.ms);
+}
+
+function showStats(g: { solidCount: number; faceCount: number; triangleCount: number }, ms: number): void {
+  setStatus(
+    `${g.solidCount} solid · ${g.faceCount} faces · ${g.triangleCount.toLocaleString()} triangles · ${Math.round(ms)} ms`,
+    "ok",
+  );
 }
 
 async function doExport(format: "step" | "stl"): Promise<void> {
@@ -135,6 +172,12 @@ async function start(): Promise<void> {
 runBtn.addEventListener("click", () => void runModel());
 stepBtn.addEventListener("click", () => void doExport("step"));
 stlBtn.addEventListener("click", () => void doExport("stl"));
+saveParamsBtn.addEventListener("click", () => {
+  if (!panel) return;
+  const updated = writeParamsBack(getDoc(editor), panel.writeback());
+  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: updated } });
+  setStatus("Saved current parameters into your code", "ok");
+});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") clearError();
 });
@@ -199,16 +242,38 @@ function triggerDownload(data: ArrayBuffer, mime: string, filename: string): voi
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/** Write current param values back into the source `params` literal, preserving the
+ *  rest of the file (handoff §G3 Save). Targets a flat object literal (model contract). */
+function writeParamsBack(source: string, values: Record<string, ParamValue>): string {
+  const m = source.match(/(export\s+const\s+params\s*=\s*\{)([^}]*)(\})/);
+  if (!m || m.index === undefined) return source;
+  let body = m[2];
+  for (const [key, val] of Object.entries(values)) {
+    const re = new RegExp(`(\\b${escapeRe(key)}\\s*:\\s*)(\\[[^\\]]*\\]|"[^"]*"|'[^']*'|[^,}\\n]+)`);
+    if (re.test(body)) body = body.replace(re, (_full, pre: string) => pre + formatValue(val));
+  }
+  return source.slice(0, m.index) + m[1] + body + m[3] + source.slice(m.index + m[0].length);
+}
+function formatValue(v: ParamValue): string {
+  if (Array.isArray(v)) return `[${v.map((s) => JSON.stringify(s)).join(", ")}]`;
+  if (typeof v === "string") return JSON.stringify(v);
+  return String(v);
+}
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
 /** Minimal inline Lucide-style glyphs (one icon set, currentColor). */
-function icon(name: "play" | "box" | "download"): string {
+function icon(name: "play" | "box" | "download" | "save"): string {
   const paths: Record<string, string> = {
     play: '<polygon points="6 3 20 12 6 21 6 3"/>',
     box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+    save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }

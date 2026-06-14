@@ -6,6 +6,39 @@ be deferred. Newest gate first.
 
 ---
 
+## G3 — Param panel (2026-06-14)
+
+### Tests / checks — all green
+- `pnpm typecheck`: clean. `pnpm build`: green. `pnpm verify`: 16/16.
+- In browser: the panel introspects the model's declared `params` and renders the four
+  control types — number → slider + number input, boolean → toggle, string → text,
+  `string[]` → select (enum). Verified live:
+  - editing `width`/`holeRadius` re-runs and re-renders (debounced, latest-build-wins);
+  - the enum select `finish: fillet → chamfer` rebuilt the part with chamfered edges (6 ms);
+  - **Save to code** wrote current values back into the source literal
+    (`width: 40 → 64`, `holeRadius: 4 → 11`), other params + formatting preserved.
+
+### What G3 delivered
+- `src/params/panel.ts` — typed controls from the declared params; edits call back into a
+  debounced, latest-wins live build.
+- Worker `resolveParams` — an enum (`string[]`) declaration resolves to the selected option
+  (default = first) before `build()`; build always sees scalars.
+- Save-to-code — `writeParamsBack` rewrites the flat `params` literal in place (numbers,
+  booleans, quoted strings, and enum arrays reordered selected-first), preserving the rest.
+
+### Security sweep
+- No new capability: the panel is DOM only — it sends `build` with params over the existing
+  protocol (no eval, no network). Save edits the editor document client-side. CSP unchanged.
+- Kernel off main thread / no telemetry / no remote-script / egress-denied: all still PASS.
+
+### Follow-ups (carried)
+- [G4] BYOK codegen writes a model into the editor. [G5] persist editor content; code-split
+  the 1 MB main bundle; self-host fonts. [later] multi-shape `build()`.
+
+**Verdict:** G3 clear. Typed controls + live re-run + Save-to-code proven; no new security surface.
+
+---
+
 ## G2 — Editor shell (2026-06-14)
 
 ### Tests / checks — all green

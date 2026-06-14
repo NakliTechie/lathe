@@ -114,10 +114,21 @@ function compileModel(source: string): CompiledModel {
   return { params: ns.params as Params, build: ns.build as (p: Params) => unknown };
 }
 
+/** Merge overrides over declared defaults; an enum (string[]) resolves to the chosen
+ *  option, or its first entry. build() always sees scalar params. */
+function resolveParams(declared: Params, overrides: Params): Params {
+  const out: Params = {};
+  for (const [k, v] of Object.entries(declared)) {
+    if (Array.isArray(v)) out[k] = (overrides[k] as string | undefined) ?? v[0];
+    else out[k] = overrides[k] ?? v;
+  }
+  return out;
+}
+
 function buildShape(model: CompiledModel, params: Params): Shape {
   let out: unknown;
   try {
-    out = model.build({ ...model.params, ...params });
+    out = model.build(resolveParams(model.params, params));
   } catch (err) {
     throw asModelError("build", err);
   }
