@@ -6,6 +6,46 @@ be deferred. Newest gate first.
 
 ---
 
+## G1 — Kernel + render core (2026-06-14)
+
+### Tests / checks — all green
+- `pnpm typecheck`: clean.
+- `pnpm verify` (headless, `--expose-gc`): **16/16** — every primitive (box, cylinder, fillet,
+  union, cut, intersect); the reference bracket meshes (11 faces) and exports a valid STEP
+  (770 entities, `MANIFOLD_SOLID_BREP` + `CYLINDRICAL_SURFACE` from both fillet and hole) and a
+  size-exact binary STL; re-run loop over 200 builds stays bounded (peak 582 handles « 3200,
+  3215 GC-reclaimed).
+- `pnpm build`: green.
+- In browser: reference bracket (box + cylinder + cut + fillet) renders with orbit/pan/zoom;
+  `lathe.rebuild({…})` re-runs live (94 ms cold → 16 ms warm) and the viewport re-frames.
+
+### What G1 delivered (beyond G0)
+- Required primitives proven: **box, cylinder, boolean (union/cut/intersect), fillet**.
+- **Re-run loop** wired and verified live (programmatic `window.lathe.rebuild`, the seed of the
+  §11 agent face).
+- Reference part upgraded to a mounting bracket so a boolean shows in the live render path.
+- **Shape disposal** (the G0 follow-up): `src/kernel/cad.ts` `runInScope` deterministically frees
+  the shapes a model creates; brepjs GC-manages the rest (verified bounded). The cad module is
+  also the authoring surface that user models (G2) will be given.
+
+### Security sweep
+- **Kernel off the main thread:** PASS — unchanged; all kernel ops in the worker.
+- **No telemetry / phone-home:** PASS — unchanged; `connect-src 'self'`.
+- **No remote-script execution:** PASS — model still bundled; nothing eval's network data.
+- **CSP:** unchanged from G0 (document strict / worker-scoped `'unsafe-eval'`).
+- **New surface — `window.lathe.rebuild`:** main-thread only, calls the existing worker protocol
+  with params; introduces no new capability and no key/network access. Acceptable.
+
+### Follow-ups (carried)
+- [later] Multi-shape `build()` returns (array of solids) — worker still takes the first shape;
+  honor the full §4 contract when assemblies matter.
+- [G5] Verify the prod CSP split live on Cloudflare Pages.
+- [G5] Self-host Inter / JetBrains Mono.
+
+**Verdict:** G1 clear. Primitives + STEP/STL export + re-run loop proven; no open security issue.
+
+---
+
 ## G0 — Spike: kernel + authoring lib (2026-06-14)
 
 ### Tests / checks — all green

@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "verify": "node scripts/verify-export.mjs"
+    "verify": "node --expose-gc scripts/verify-export.mjs"
   },
   "dependencies": {
     "brepjs": "^18.69.1",

@@ -7,6 +7,7 @@
 import initOCCT from "brepjs-opencascade/src/brepjs_single.js";
 import wasmUrl from "brepjs-opencascade/src/brepjs_single.wasm?url";
 import { initFromOC, mesh, toBufferGeometryData, exportSTEP, exportSTL, unwrap } from "brepjs";
+import { runInScope } from "./cad";
 import * as reference from "../models/reference";
 import type { Request, Response, GeometryPayload, Params, Vec3 } from "./protocol";
 
@@ -78,7 +79,8 @@ ctx.onmessage = async (e: MessageEvent<Request>) => {
       case "build": {
         await init();
         const t0 = performance.now();
-        const geometry = meshToGeometry(buildModel(req.params));
+        // Build + mesh inside a disposal scope; the typed arrays survive, the shapes don't.
+        const geometry = runInScope(() => meshToGeometry(buildModel(req.params)));
         const ms = performance.now() - t0;
         reply({ id: req.id, ok: true, kind: "build", geometry, ms }, [
           geometry.position.buffer,
@@ -89,21 +91,15 @@ ctx.onmessage = async (e: MessageEvent<Request>) => {
       }
       case "export": {
         await init();
-        const shape = buildModel(req.params);
-        const faceCount = mesh(shape, { tolerance: 0.05, angularTolerance: 0.25, cache: false }).faceGroups.length;
-
-        let blob: Blob;
-        let mime: string;
-        let filename: string;
-        if (req.format === "step") {
-          blob = unwrap(exportSTEP(shape)); // throws (loud) on kernel failure
-          mime = "application/step";
-          filename = "lathe-part.step";
-        } else {
-          blob = unwrap(exportSTL(shape, { binary: true }));
-          mime = "model/stl";
-          filename = "lathe-part.stl";
-        }
+        // Serialise to the Blob inside the scope (the bytes survive; the shape is freed).
+        const { blob, mime, filename, faceCount } = runInScope(() => {
+          const shape = buildModel(req.params);
+          const faces = mesh(shape, { tolerance: 0.05, angularTolerance: 0.25, cache: false }).faceGroups.length;
+          if (req.format === "step") {
+            return { blob: unwrap(exportSTEP(shape)), mime: "application/step", filename: "lathe-part.step", faceCount: faces };
+          }
+          return { blob: unwrap(exportSTL(shape, { binary: true })), mime: "model/stl", filename: "lathe-part.stl", faceCount: faces };
+        });
         const data = await blob.arrayBuffer();
         reply(
           { id: req.id, ok: true, kind: "export", format: req.format, data, mime, filename, solidCount: 1, faceCount },

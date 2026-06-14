@@ -1,8 +1,8 @@
 /**
- * Headless verification harness — proves the kernel pipeline is callable WITHOUT a
- * DOM (the v1.1 agent-face property, §11): load OCCT in Node, build the reference
- * part, export STEP + STL, and structurally validate the bytes. Exits non-zero on
- * failure. Run: `node scripts/verify-export.mjs`.
+ * Headless verification harness (G1). Proves the kernel pipeline is callable WITHOUT
+ * a DOM (the v1.1 agent-face property, §11): loads OCCT in Node and exercises every
+ * required primitive, the reference part's STEP/STL, and the re-run loop's handle
+ * discipline. Exits non-zero on failure. Run: `node scripts/verify-export.mjs`.
  */
 import { fileURLToPath } from "node:url";
 import { writeFileSync } from "node:fs";
@@ -10,7 +10,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import initOCCT from "brepjs-opencascade/src/brepjs_single.js";
-import { initFromOC, box, fillet, edgeFinder, unwrap, exportSTEP, exportSTL, mesh } from "brepjs";
+import {
+  initFromOC, box, cylinder, fuse, cut, intersect, fillet, translate, edgeFinder,
+  unwrap, mesh, exportSTEP, exportSTL, getDisposalStats,
+} from "brepjs";
 
 const wasmPath = fileURLToPath(
   new URL("../node_modules/brepjs-opencascade/src/brepjs_single.wasm", import.meta.url),
@@ -18,54 +21,81 @@ const wasmPath = fileURLToPath(
 
 let failures = 0;
 function check(label, cond, detail = "") {
-  const ok = !!cond;
-  if (!ok) failures++;
-  console.log(`${ok ? "  ok " : "FAIL "} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!cond) failures++;
+  console.log(`${cond ? "  ok " : "FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
 }
+const triCount = (s) => mesh(s, { tolerance: 0.1, cache: false }).triangles.length / 3;
+const faceCount = (s) => mesh(s, { tolerance: 0.1, cache: false }).faceGroups.length;
 
-console.log("Lathe — headless kernel verification\n");
-
-const OC = await initOCCT({ locateFile: () => wasmPath });
-initFromOC(OC);
+console.log("Lathe — headless kernel verification (G1)\n");
+initFromOC(await initOCCT({ locateFile: () => wasmPath }));
 console.log("kernel: OCCT initialised in Node (no DOM)\n");
 
-// Same geometry as src/models/reference.ts.
-const solid = unwrap(fillet(box(40, 20, 20), edgeFinder().inDirection([0, 0, 1]), 3));
+// --- the reference part: a mounting bracket (matches src/models/reference.ts) ---
+function bracket(p) {
+  let solid = box(p.width, p.depth, p.height);
+  solid = unwrap(fillet(solid, edgeFinder().inDirection([0, 0, 1]), p.fillet));
+  const drill = translate(cylinder(p.holeRadius, p.height + 2), [p.width / 2, p.depth / 2, -1]);
+  return unwrap(cut(solid, drill));
+}
+const P = { width: 40, depth: 30, height: 12, holeRadius: 4, fillet: 3 };
 
-// --- mesh ---
-const m = mesh(solid, { tolerance: 0.05, angularTolerance: 0.25, cache: false });
-check("mesh: has triangles", m.triangles.length > 0, `${m.triangles.length / 3} tris`);
-check("mesh: 10 faces (6 box + 4 filleted)", m.faceGroups.length === 10, `${m.faceGroups.length} faces`);
+console.log("primitives:");
+check("box", triCount(box(10, 10, 10)) > 0);
+check("cylinder", triCount(cylinder(5, 10)) > 0);
+check("fillet adds faces", faceCount(unwrap(fillet(box(10, 10, 10), edgeFinder().inDirection([0, 0, 1]), 2))) > 6);
+check("union (fuse)", triCount(unwrap(fuse(box(10, 10, 10), translate(box(10, 10, 10), [6, 6, 6])))) > 0);
+check("cut", triCount(unwrap(cut(box(10, 10, 10), translate(cylinder(3, 30), [5, 5, -10])))) > 0);
+{
+  const overlap = unwrap(intersect(box(10, 10, 10), translate(box(10, 10, 10), [5, 5, 5])));
+  const m = mesh(overlap, { tolerance: 0.1, cache: false });
+  const xs = [];
+  for (let i = 0; i < m.vertices.length; i += 3) xs.push(m.vertices[i]);
+  check("intersect (5×5×5 overlap)", Math.round(Math.max(...xs) - Math.min(...xs)) === 5, `x-span ${Math.round(Math.max(...xs) - Math.min(...xs))}`);
+}
 
-// --- STEP ---
-const stepBlob = unwrap(exportSTEP(solid));
-const step = await stepBlob.text();
+console.log("\nreference part (bracket):");
+const part = bracket(P);
+check("bracket meshes", triCount(part) > 0, `${triCount(part)} tris, ${faceCount(part)} faces`);
+
+const step = await unwrap(exportSTEP(part)).text();
 check("STEP: ISO-10303-21 header", step.startsWith("ISO-10303-21;"));
 check("STEP: closes cleanly", step.trimEnd().endsWith("END-ISO-10303-21;"));
 check("STEP: declares a schema", /FILE_SCHEMA\s*\(\s*\(\s*'[^']+'/.test(step));
-check(
-  "STEP: contains B-rep solid entities",
-  /MANIFOLD_SOLID_BREP|ADVANCED_BREP_SHAPE_REPRESENTATION|CLOSED_SHELL/.test(step),
-);
-check("STEP: has cylindrical (filleted) surfaces", /CYLINDRICAL_SURFACE/.test(step));
+check("STEP: B-rep solid entities", /MANIFOLD_SOLID_BREP|ADVANCED_BREP_SHAPE_REPRESENTATION|CLOSED_SHELL/.test(step));
+check("STEP: cylindrical (fillet + hole) surfaces", /CYLINDRICAL_SURFACE/.test(step));
 const entityCount = (step.match(/^#\d+\s*=/gm) || []).length;
 check("STEP: non-trivial entity count", entityCount > 50, `${entityCount} entities`);
 
-// --- STL (binary) ---
-const stlBlob = unwrap(exportSTL(solid, { binary: true }));
-const stl = new Uint8Array(await stlBlob.arrayBuffer());
+const stl = new Uint8Array(await unwrap(exportSTL(part, { binary: true })).arrayBuffer());
 const triN = new DataView(stl.buffer).getUint32(80, true);
-check("STL: binary size matches triangle count", stl.length === 84 + triN * 50, `${triN} tris, ${stl.length} bytes`);
-check("STL: non-empty", triN > 0);
+check("STL: binary size exact", stl.length === 84 + triN * 50, `${triN} tris`);
 
-// Save for manual FreeCAD inspection (G1 artifact).
-const outDir = tmpdir();
-const stepPath = join(outDir, "lathe-reference.step");
-const stlPath = join(outDir, "lathe-reference.stl");
-writeFileSync(stepPath, step);
-writeFileSync(stlPath, stl);
-console.log(`\nwrote ${stepPath}\nwrote ${stlPath}`);
-console.log(`STEP is ${step.length} bytes, ${entityCount} entities`);
+// --- re-run loop: brepjs GC-manages OCCT handles (FinalizationRegistry). Build many
+//     times, letting GC run, and assert handles stay BOUNDED (plateau) rather than
+//     growing linearly — i.e. the re-run loop does not leak. Needs --expose-gc
+//     (`pnpm verify` provides it); the in-app worker also disposes deterministically
+//     via runInScope (src/kernel/cad.ts). ---
+console.log("\nre-run loop (200 builds, GC-managed handles):");
+for (let i = 0; i < 200; i++) {
+  mesh(bracket({ ...P, holeRadius: 2 + (i % 6) }), { tolerance: 0.2, cache: false });
+  if (i % 20 === 0) {
+    globalThis.gc?.();
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+globalThis.gc?.();
+await new Promise((r) => setTimeout(r, 20));
+globalThis.gc?.();
+const st = getDisposalStats();
+check("handles bounded — no linear leak", st.peakHandles < 200 * 16, `peak ${st.peakHandles} « cap ${200 * 16}`);
+check("GC reclaims handles", st.gcCollected > 200, `gcCollected ${st.gcCollected}`);
+console.log("  disposal stats:", JSON.stringify(st));
+
+// Save reference exports for manual FreeCAD inspection (G1 artifact).
+writeFileSync(join(tmpdir(), "lathe-reference.step"), step);
+writeFileSync(join(tmpdir(), "lathe-reference.stl"), stl);
+console.log(`\nwrote ${join(tmpdir(), "lathe-reference.step")} (${entityCount} entities, ${step.length} bytes)`);
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -14,7 +14,7 @@ app.insertAdjacentHTML(
   `
   <div id="viewport"></div>
   <header class="topbar">
-    <div class="brand"><span class="dot"></span>Lathe<span class="tag">sovereign code-CAD · G0</span></div>
+    <div class="brand"><span class="dot"></span>Lathe<span class="tag">sovereign code-CAD</span></div>
     <div class="spacer"></div>
     <button class="btn" id="export-step" disabled aria-label="Export STEP file for manufacturing">
       ${icon("box")} STEP
@@ -66,37 +66,53 @@ function call(req: ReqNoId): Promise<Response> {
 }
 
 /* ---- flow ---- */
-const params: Params = {}; // G0: model defaults
+let currentParams: Params = {}; // overrides merged over the model's declared defaults
+
+/** Build with the given params and swap the viewport — the re-run loop's one step. */
+async function doBuild(params: Params): Promise<void> {
+  currentParams = params;
+  const res = await call({ kind: "build", params });
+  if (!res.ok) {
+    setStatus(`Build failed — ${res.error}`, "error");
+    return;
+  }
+  if (res.kind !== "build") return;
+  viewport.setGeometry(res.geometry);
+  const g = res.geometry;
+  setStatus(
+    `${g.solidCount} solid · ${g.faceCount} faces · ${g.triangleCount.toLocaleString()} triangles · built in ${Math.round(res.ms)} ms`,
+    "ok",
+  );
+  stepBtn.disabled = false;
+  stlBtn.disabled = false;
+}
 
 async function start(): Promise<void> {
   try {
     bootStatus.textContent = "Loading kernel…";
     const initRes = await call({ kind: "init" });
     if (!initRes.ok) throw new Error(initRes.error);
-
     bootStatus.textContent = "Building reference part…";
-    const res = await call({ kind: "build", params });
-    if (!res.ok) throw new Error(res.error);
-    if (res.kind !== "build") return;
-
-    viewport.setGeometry(res.geometry);
-    const g = res.geometry;
-    setStatus(
-      `Reference part — ${g.solidCount} solid, ${g.faceCount} faces, ${g.triangleCount.toLocaleString()} triangles · built in ${Math.round(res.ms)} ms`,
-      "ok",
-    );
-    stepBtn.disabled = false;
-    stlBtn.disabled = false;
+    await doBuild(currentParams);
     hideBoot();
   } catch (err) {
-    setStatus(`Failed to build reference part — ${message(err)}`, "error");
+    setStatus(`Failed to build — ${message(err)}`, "error");
     hideBoot();
   }
 }
 
+// Programmatic surface — the seed of the v1.1 agent face (§11): drive the same build
+// pipeline from outside the UI. `lathe.rebuild({ holeRadius: 8 })` re-runs live.
+declare global {
+  interface Window {
+    lathe?: { rebuild: (overrides?: Params) => Promise<void> };
+  }
+}
+window.lathe = { rebuild: (overrides: Params = {}) => doBuild({ ...currentParams, ...overrides }) };
+
 async function doExport(format: "step" | "stl"): Promise<void> {
   setStatus(`Exporting ${format.toUpperCase()}…`);
-  const res = await call({ kind: "export", format, params });
+  const res = await call({ kind: "export", format, params: currentParams });
   if (!res.ok) {
     setStatus(`${format.toUpperCase()} export failed — ${res.error}`, "error");
     return;
