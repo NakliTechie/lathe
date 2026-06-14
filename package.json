@@ -1,0 +1,24 @@
+{
+  "name": "lathe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-native, sovereign, parametric code-CAD. The code is the model.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify-export.mjs"
+  },
+  "dependencies": {
+    "brepjs": "^18.69.1",
+    "brepjs-opencascade": "^0.15.6",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}

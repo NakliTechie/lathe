@@ -1,0 +1,101 @@
+/* Lathe — design tokens (handoff §6) + G0 spike shell.
+   Calm, craft, technical-but-warm. Dark default; brass/amber accent. */
+:root {
+  --surface-0: #16161a;
+  --surface-1: #1d1d22;
+  --surface-2: #26262d;
+  --border: #33333c;
+  --text: #e8e8ea;
+  --text-dim: #9a9aa3;
+  --accent: #d8973c; /* brass */
+  --accent-dim: #a36f2c;
+  --danger: #e5564e;
+  --ok: #5bbd7a;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --space: 8px;
+  --font-ui: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+[data-theme="light"] {
+  --surface-0: #faf9f6;
+  --surface-1: #ffffff;
+  --surface-2: #f0efe9;
+  --border: #e0ded6;
+  --text: #1c1c1e;
+  --text-dim: #6b6b73;
+  --accent: #b5751f;
+  --accent-dim: #8c5a18;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--surface-0);
+  overflow: hidden;
+}
+
+#app { position: fixed; inset: 0; }
+
+/* Viewport canvas fills the app; HUD floats above it. */
+#viewport { position: absolute; inset: 0; }
+#viewport canvas { display: block; outline: none; }
+
+/* Boot overlay */
+.boot {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; flex-direction: column; gap: var(--space);
+  align-items: center; justify-content: center;
+  background: var(--surface-0);
+  transition: opacity 0.4s ease;
+}
+.boot.hidden { opacity: 0; pointer-events: none; }
+.boot-mark { font-size: 28px; font-weight: 600; letter-spacing: 0.02em; }
+.boot-mark::after { content: ""; }
+.boot-status { color: var(--text-dim); font-size: 13px; font-family: var(--font-mono); }
+
+/* Top bar */
+.topbar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; gap: calc(var(--space) * 1.5);
+  padding: calc(var(--space) * 1.25) calc(var(--space) * 2);
+  background: linear-gradient(var(--surface-0), transparent);
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+.brand {
+  font-weight: 600; font-size: 15px; letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: var(--space);
+}
+.brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent-dim); }
+.brand .tag { color: var(--text-dim); font-weight: 400; font-size: 12px; }
+.spacer { flex: 1; }
+
+.btn {
+  font: inherit; font-size: 13px;
+  color: var(--text); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: calc(var(--space) * 0.75) calc(var(--space) * 1.5);
+  cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  display: inline-flex; align-items: center; gap: calc(var(--space) * 0.75);
+}
+.btn:hover { border-color: var(--accent-dim); background: var(--surface-2); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn svg { width: 16px; height: 16px; }
+
+/* Status bar (aria-live) */
+.statusbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: flex; align-items: center; gap: var(--space);
+  padding: calc(var(--space) * 1.25) calc(var(--space) * 2);
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+  background: linear-gradient(transparent, var(--surface-0));
+  pointer-events: none;
+}
+.statusbar.is-error { color: var(--danger); }
+.statusbar.is-ok .led { background: var(--ok); }
+.statusbar .led { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.statusbar.is-error .led { background: var(--danger); }

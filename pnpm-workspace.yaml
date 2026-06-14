@@ -1,0 +1,4 @@
+# Lathe is a standalone repo. This marks it as its own pnpm workspace root so pnpm
+# does not walk up into the ~/Code parent workspace and scatter Lathe's dependencies
+# into the parent lockfile. No sub-packages — Lathe is a single package.
+packages: []

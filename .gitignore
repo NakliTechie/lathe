@@ -21,8 +21,9 @@ dist/
 ehthumbs.db
 Thumbs.db
 
-# Editor junk
+# Editor / tooling junk
 .idea/
 .vscode/
+.claude/
 *.swp
 *~

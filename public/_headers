@@ -1,0 +1,31 @@
+# Cloudflare Pages headers — the shipped security posture (handoff §8).
+#
+# CSP is split: the DOCUMENT is strict (no 'unsafe-eval'); the kernel WORKER bundle
+# adds 'unsafe-eval' because the in-browser OCCT kernel (emscripten Embind) generates
+# invoker functions via `new Function` — intrinsic to every OCCT-WASM build, and
+# unremovable without forking the kernel (rule #6). A script file's response-CSP is
+# inert except when that file is loaded AS a worker, so the permissive policy on
+# /assets/* does NOT loosen the document's script execution — the main chunks loaded
+# via <script> are still governed by the strict document policy below.
+#
+# connect-src is pinned to 'self' until G4 adds the specific BYOK provider hosts
+# routed via nakli-ai. The v1.1 localhost bridge origin is NOT added here.
+
+# Shared, non-CSP hardening on every response.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), interest-cohort=()
+
+# DOCUMENT policy (strict — no 'unsafe-eval'). The thread holding the BYOK key and
+# talking to the network never gets dynamic eval.
+/
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+/index.html
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# WORKER bundle (and other assets). 'unsafe-eval' here only takes effect for the file
+# instantiated as the kernel Worker; it is inert for chunks loaded as <script>.
+/assets/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'
