@@ -6,10 +6,12 @@
  */
 import "./styles.css";
 import { Viewport } from "./render/viewport";
-import { createEditor, getDoc } from "./editor/editor";
+import { createEditor, getDoc, setEditorTheme } from "./editor/editor";
 import { createParamPanel, type ParamPanel } from "./params/panel";
 import { generateModel, MODELS, DEFAULT_MODEL } from "./codegen/generate";
 import { getFingerprint, setKey, clearKey } from "./codegen/vault";
+import { openModel, saveModel, saveDraft, loadDraft } from "./persist/files";
+import { openHelp } from "./ui/help";
 import defaultModel from "./models/default-model.js?raw";
 import type { EditorView } from "@codemirror/view";
 import type { Request, Response, Params, ParamValue, Failure } from "./kernel/protocol";
@@ -21,9 +23,13 @@ app.insertAdjacentHTML(
   <header class="topbar">
     <div class="brand"><span class="dot"></span>Lathe<span class="tag">sovereign code-CAD</span></div>
     <div class="spacer"></div>
+    <button class="btn btn-icon" id="open" aria-label="Open a model file" title="Open">${icon("folder")}</button>
+    <button class="btn btn-icon" id="save" aria-label="Save model to disk — Cmd or Ctrl + S" title="Save (Cmd/Ctrl+S)">${icon("save")}</button>
     <button class="btn btn-run" id="run" aria-label="Run model — Cmd or Ctrl + Enter">${icon("play")} Run</button>
     <button class="btn" id="export-step" disabled aria-label="Export STEP file for manufacturing">${icon("box")} STEP</button>
     <button class="btn" id="export-stl" disabled aria-label="Export STL file for 3D printing">${icon("download")} STL</button>
+    <button class="btn btn-icon" id="theme" aria-label="Toggle light or dark theme" title="Theme">${icon("moon")}</button>
+    <button class="btn btn-icon" id="help" aria-label="Help" title="Help">${icon("help")}</button>
   </header>
   <main class="workbench">
     <section class="pane pane-code">
@@ -71,6 +77,10 @@ const errorEl = document.getElementById("error")!;
 const runBtn = document.getElementById("run") as HTMLButtonElement;
 const stepBtn = document.getElementById("export-step") as HTMLButtonElement;
 const stlBtn = document.getElementById("export-stl") as HTMLButtonElement;
+const openBtn = document.getElementById("open") as HTMLButtonElement;
+const saveBtn = document.getElementById("save") as HTMLButtonElement;
+const themeBtn = document.getElementById("theme") as HTMLButtonElement;
+const helpBtn = document.getElementById("help") as HTMLButtonElement;
 const paramsBody = document.getElementById("params")!;
 const saveParamsBtn = document.getElementById("save-params") as HTMLButtonElement;
 const promptInput = document.getElementById("prompt") as HTMLInputElement;
@@ -84,7 +94,21 @@ const keyClearBtn = document.getElementById("key-clear") as HTMLButtonElement;
 const keyNote = document.getElementById("key-note")!;
 
 const viewport = new Viewport(document.getElementById("viewport")!);
-const editor: EditorView = createEditor(document.getElementById("editor")!, defaultModel, () => void runModel());
+
+const THEME_PREF = "lathe.theme";
+let theme: "dark" | "light" = localStorage.getItem(THEME_PREF) === "light" ? "light" : "dark";
+
+let draftTimer = 0;
+const editor: EditorView = createEditor(
+  document.getElementById("editor")!,
+  defaultModel,
+  () => void runModel(),
+  (doc) => {
+    clearTimeout(draftTimer);
+    draftTimer = self.setTimeout(() => void saveDraft(doc), 600); // autosave draft (IndexedDB)
+  },
+  theme === "dark",
+);
 
 /* ---- worker RPC ---- */
 const worker = new Worker(new URL("./kernel/worker.ts", import.meta.url), { type: "module" });
@@ -189,6 +213,9 @@ async function start(): Promise<void> {
     bootStatus.textContent = "Loading kernel…";
     const initRes = await call({ kind: "init" });
     if (!initRes.ok) throw new Error(initRes.error);
+    // Restore the last unsaved draft (local IndexedDB) so a reload doesn't lose work.
+    const draft = await loadDraft();
+    if (draft && draft.trim()) setEditorSource(draft);
     bootStatus.textContent = "Building model…";
     await runModel();
     hideBoot();
@@ -201,6 +228,37 @@ async function start(): Promise<void> {
 runBtn.addEventListener("click", () => void runModel());
 stepBtn.addEventListener("click", () => void doExport("step"));
 stlBtn.addEventListener("click", () => void doExport("stl"));
+
+/* ---- file ops + theme + help (G5) ---- */
+openBtn.addEventListener("click", async () => {
+  const file = await openModel();
+  if (!file) return;
+  setEditorSource(file.content);
+  setStatus(`Opened ${file.name}`, "ok");
+  await runModel();
+});
+
+async function saveToDisk(): Promise<void> {
+  const name = await saveModel(getDoc(editor));
+  if (name) setStatus(`Saved ${name}`, "ok");
+}
+saveBtn.addEventListener("click", () => void saveToDisk());
+
+function applyTheme(): void {
+  document.documentElement.dataset.theme = theme;
+  themeBtn.innerHTML = icon(theme === "dark" ? "sun" : "moon");
+  setEditorTheme(editor, theme === "dark");
+  viewport.refreshTheme();
+}
+applyTheme();
+themeBtn.addEventListener("click", () => {
+  theme = theme === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_PREF, theme);
+  applyTheme();
+});
+
+helpBtn.addEventListener("click", () => openHelp());
+
 saveParamsBtn.addEventListener("click", () => {
   if (!panel) return;
   const updated = writeParamsBack(getDoc(editor), panel.writeback());
@@ -286,6 +344,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     clearError();
     keyPanel.hidden = true;
+  }
+  // Intercept the browser's Save and route to disk (handoff §10).
+  if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+    e.preventDefault();
+    void saveToDisk();
   }
 });
 
@@ -378,7 +441,7 @@ function escapeHtml(s: string): string {
 }
 
 /** Minimal inline Lucide-style glyphs (one icon set, currentColor). */
-function icon(name: "play" | "box" | "download" | "save" | "sparkles" | "key"): string {
+function icon(name: "play" | "box" | "download" | "save" | "sparkles" | "key" | "folder" | "sun" | "moon" | "help"): string {
   const paths: Record<string, string> = {
     play: '<polygon points="6 3 20 12 6 21 6 3"/>',
     box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
@@ -386,6 +449,10 @@ function icon(name: "play" | "box" | "download" | "save" | "sparkles" | "key"): 
     save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
     sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
     key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+    folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+    moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }

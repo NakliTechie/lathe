@@ -6,6 +6,53 @@ be deferred. Newest gate first.
 
 ---
 
+## G5 — Persistence + polish + ship (2026-06-14)
+
+### Tests / checks — all green
+- `pnpm typecheck`: clean. `pnpm build`: green. `pnpm verify`: 16/16.
+- In browser:
+  - **Theme** toggles light/dark across chrome, viewport, **and** the editor (CodeMirror theme
+    compartment swaps live); the pref persists across reload (localStorage).
+  - **Help modal** (§15) opens with all six sections and is focus-trapped (Esc / backdrop close,
+    focus restored to the trigger).
+  - **Draft autosave** — an edited model (`DRAFTMARKER`) survived a reload (IndexedDB draft →
+    restored on boot, rebuilt to 6 faces). Theme pref persisted too.
+  - **Cmd/Ctrl+S** intercepts the browser save; topbar gained Open / Save / Theme / Help.
+
+### What G5 delivered
+- **Persistence** (`src/persist/`): FSA save/open of model files with handle persistence
+  (IndexedDB) and a download + file-input fallback off Chromium; a working-draft autosave to
+  IndexedDB (never localStorage — §7) so a reload never loses unsaved code; a tiny IDB keyval.
+- **Keyboard map** (§10): `Cmd/Ctrl+Enter` run · `Cmd/Ctrl+S` save-to-disk (browser save
+  intercepted) · `Esc` close/dismiss.
+- **Theme** (§6): dark default, light available, persisted; the editor follows.
+- **Help modal** (§15) + a reusable accessible modal (`src/ui/modal.ts`, focus trap + restore).
+- **Docs:** product `README.md` (§14, replaces the scaffold pointer) + `DEPLOY.md` (owner-gated
+  Cloudflare Pages + DNS runbook).
+
+### Security sweep
+- **No new external surface:** file ops are local (FSA / download); the draft lives in IndexedDB;
+  the theme is a localStorage UI pref (§7-allowed). BYOK key handling is unchanged (G4). CSP
+  unchanged. No telemetry; kernel still off the main thread. All sovereignty invariants hold.
+- **a11y:** modal focus-trap + restore; ARIA labels on every icon button; `aria-live` status line
+  gives a **text confirmation of operations** (build counts, "Exported …", "Saved …") for
+  non-visual users; `:focus-visible` rings; brass accent meets AA on both themes.
+
+### Owner-gated / deferred (documented, not silently dropped)
+- **Deploy to `lathe.naklitechie.com`** — Cloudflare Pages + DNS need the owner's account; runbook
+  in `DEPLOY.md`. The build is deploy-ready (static + `public/_headers`).
+- **Live prod-CSP verification** — the document-strict / worker-permissive split can only be
+  checked on the edge (`vite preview` doesn't apply `_headers`); `DEPLOY.md` has the `curl` checks.
+- Deferred polish: param presets; cross-session mesh cache; self-host Inter / JetBrains Mono
+  (system fallback ships — no external fetch, sovereign); code-split the 1 MB main bundle (advisory;
+  the 8 MB-gz WASM dominates regardless). [human] real-key codegen smoke test.
+
+**Verdict:** G5 clear. v1.0 is feature-complete on everything buildable here; the only open items
+are owner-gated (deploy + DNS) or explicitly deferred polish. No security issue open on any core
+surface across G0–G5.
+
+---
+
 ## G4 — Codegen (BYOK) (2026-06-14)
 
 ### Tests / checks — all green

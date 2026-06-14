@@ -78,6 +78,11 @@ export class Viewport {
     this.loop();
   }
 
+  /** Re-read themed colours (called on light/dark toggle). */
+  refreshTheme(): void {
+    this.scene.background = new Color(cssColor("--surface-0", "#16161a"));
+  }
+
   /** Replace the displayed part with new geometry and frame the camera to it. */
   setGeometry(g: GeometryPayload): void {
     this.clearPart();

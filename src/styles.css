@@ -335,6 +335,70 @@ body {
 .statusbar.is-ok .led { background: var(--ok); }
 .statusbar.is-error .led { background: var(--danger); }
 
+/* ---- modal (help, §15) ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: calc(var(--space) * 2);
+}
+.modal {
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal:focus { outline: none; }
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+}
+.modal-title { margin: 0; font-size: 15px; font-weight: 600; }
+.modal-close { font-size: 13px; line-height: 1; }
+.modal-body { padding: calc(var(--space) * 2); }
+.help-section { margin-bottom: calc(var(--space) * 2); }
+.help-section:last-child { margin-bottom: 0; }
+.help-section h3 {
+  margin: 0 0 var(--space);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.help-section p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+.help-section code { font-family: var(--font-mono); color: var(--accent); font-size: 12px; }
+.help-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 0.5);
+  font-size: 13px;
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--text);
+}
+
 /* ---- boot overlay ---- */
 .boot {
   position: absolute;
